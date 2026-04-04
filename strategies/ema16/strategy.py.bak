@@ -1,0 +1,48 @@
+import pandas as pd
+import numpy as np
+from strategies.ema16.params import get_default_params
+
+def get_entries_exits(df: pd.DataFrame, params: dict = None):
+    p = {**get_default_params(), **(params or {})}
+
+    df = df.resample('4h').agg({'open':'first','high':'max','low':'min','close':'last','volume':'sum'}).dropna()
+    df = df.copy()
+    df["ema16"] = df["close"].ewm(span=p["ema_period"], adjust=False).mean()
+    prev_close = df["close"].shift(1)
+    prev_ema   = df["ema16"].shift(1)
+    cross_above = (df["close"] > df["ema16"]) & (prev_close <= prev_ema)
+    cross_below = (df["close"] < df["ema16"]) & (prev_close >= prev_ema)
+    df["signal"] = 0
+    df.loc[cross_above, "signal"] =  1
+    df.loc[cross_below, "signal"] = -1
+    # Stop: 2% from close — consistent with engine STOP_PCT
+    # TP: not set here — engine default (close*1.04) will apply
+    # Intent: trailing stop is the primary exit, not fixed TP
+    df["stop_loss_long"]  = df["close"] * (1 - p.get("stop_pct", 0.02))
+    df["stop_loss_short"] = df["close"] * (1 + p.get("stop_pct", 0.02))
+    # No take_profit_long / take_profit_short set here intentionally
+    # Engine fallback: long TP = close*1.04, short TP = close*0.96
+
+    # Diagnostic aliases — engine looks for ema_fast/ema_slow columns
+    # EMA16 only has one EMA so both aliases point to the same value
+    df["ema_fast"] = df["ema16"]
+    df["ema_slow"] = df["ema16"]
+
+    df.attrs["trail_trigger"] = p["trail_trigger"]
+    df.attrs["trail_offset"]  = p["trail_offset"]
+
+    # Scaled exits — opt-in contract with engine
+    # Weights must sum to 1.0
+    # Format: (price_move_pct, fraction_of_position_to_close)
+    df.attrs["tp_levels"] = [
+        (0.02,  0.40),   # close 40% at +2%
+        (0.025, 0.30),   # close 30% at +2.5%
+        (0.03,  0.30),   # close 30% at +3.0%
+    ]
+    warmup = p["ema_period"] * 2
+    df     = df.iloc[warmup:].copy()
+    long_entries  = df["signal"] == 1
+    short_entries = pd.Series(False, index=df.index)
+    long_exits    = df["signal"] == -1
+    short_exits   = pd.Series(False, index=df.index)
+    return long_entries, short_entries, short_exits, long_exits, df
