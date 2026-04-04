@@ -63,6 +63,7 @@ RISK_PCT = 0.005             # 0.5% equity per trade
 STOP_PCT = 0.02              # 2% fixed stop
 LEVERAGE = 5
 COIN_LEVERAGE = {"MERL": 3, "HEMI": 3}
+COIN_PRICE_DECIMALS = {"MERL": 6, "HEMI": 6}
 MIN_NOTIONAL = 11.0          # minimum order size USD
 BASKET_SHADOW = True
 SLIPPAGE = 0.01              # 1% slippage buffer for IOC
@@ -197,10 +198,13 @@ def get_exchange():
 def place_order(exchange, coin_hl: str, is_buy: bool, size: float,
                 price: float, reduce_only: bool = False) -> dict:
     """Place IOC limit order with slippage buffer."""
+    max_dec = COIN_PRICE_DECIMALS.get(coin_hl, None)
     if is_buy:
         limit_px = round_sig(price * (1 + SLIPPAGE))
+        if max_dec: limit_px = round(limit_px, max_dec)
     else:
         limit_px = round_sig(price * (1 - SLIPPAGE))
+        if max_dec: limit_px = round(limit_px, max_dec)
 
     sz = round_size(size, coin_hl)
     result = exchange.order(
