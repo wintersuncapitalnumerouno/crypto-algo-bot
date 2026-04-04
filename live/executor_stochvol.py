@@ -52,6 +52,8 @@ from eth_account import Account
 # ── Config ────────────────────────────────────────────────────
 PRIVATE_KEY    = os.getenv("HL_WALLET2_PRIVATE_KEY")
 WALLET_ADDRESS = os.getenv("HL_WALLET2_WALLET_ADDRESS")
+EXPECTED_WALLET = "0xb2A1B87B1B91Ad37520594263958cED3948151fF"
+DEDUP_FILE = "last_entry_candle.json"
 HL_API = "https://api.hyperliquid.xyz"
 
 COINS = ["PEPE", "SOL", "AAVE", "DOGE", "LINK", "ETH", "XRP"]
@@ -303,14 +305,39 @@ class StochVolExecutor:
 
     def _validate_env(self):
         if not PRIVATE_KEY or not WALLET_ADDRESS:
-            log("❌ HL_WALLET2_PRIVATE_KEY or HL_WALLET2_WALLET_ADDRESS not set in .env")
+            log(f"❌ STARTUP INVARIANT FAILED: wallet env vars not set in .env")
+            send_telegram(f"🚨 <b>Bot refused to start</b>\nReason: wallet env vars missing from .env")
             sys.exit(1)
 
         if len(PRIVATE_KEY) != 66:
-            log(f"❌ Private key length {len(PRIVATE_KEY)} — expected 66 chars")
+            log(f"❌ STARTUP INVARIANT FAILED: private key length {len(PRIVATE_KEY)} — expected 66")
+            send_telegram(f"🚨 <b>Bot refused to start</b>\nReason: private key wrong length ({len(PRIVATE_KEY)})")
             sys.exit(1)
 
+        if not WALLET_ADDRESS.startswith("0x") or len(WALLET_ADDRESS) != 42:
+            log(f"❌ STARTUP INVARIANT FAILED: wallet address format invalid: {WALLET_ADDRESS}")
+            send_telegram(f"🚨 <b>Bot refused to start</b>\nReason: wallet address format invalid")
+            sys.exit(1)
+
+        if WALLET_ADDRESS.lower() != EXPECTED_WALLET.lower():
+            log(f"❌ STARTUP INVARIANT FAILED: wallet mismatch")
+            log(f"   Expected: {EXPECTED_WALLET}")
+            log(f"   Got:      {WALLET_ADDRESS}")
+            send_telegram(f"🚨 <b>Bot refused to start — WALLET MISMATCH</b>\nExpected: {EXPECTED_WALLET[:10]}...\nGot: {WALLET_ADDRESS[:10]}...")
+            sys.exit(1)
+
+        state_path = Path(__file__).parent / DEDUP_FILE
+        if state_path.exists():
+            try:
+                import json
+                json.loads(state_path.read_text())
+            except Exception as e:
+                log(f"❌ STARTUP INVARIANT FAILED: dedup state file corrupted: {e}")
+                send_telegram(f"🚨 <b>Bot refused to start</b>\nReason: dedup state file corrupted\n{e}")
+                sys.exit(1)
+
         log("✅ Credentials validated")
+        log(f"✅ Wallet address verified: {WALLET_ADDRESS}")
 
     def _set_leverage_all(self):
         for coin in COINS:
