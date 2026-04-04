@@ -56,7 +56,7 @@ EXPECTED_WALLET = "0x9b808Eaa6A795f22C3154c2a8a22C9a1F916BD94"
 DEDUP_FILE = "last_entry_candle_2.json"
 HL_API = "https://api.hyperliquid.xyz"
 
-COINS = ["PEPE", "SOL", "AAVE", "DOGE", "LINK", "ETH", "XRP"]
+COINS = ["PEPE", "SOL", "AAVE", "DOGE", "LINK", "ETH", "XRP", "MERL", "HEMI"]
 
 LOOP_INTERVAL = 300          # 5 minutes
 RISK_PCT = 0.005             # 0.5% equity per trade
@@ -85,6 +85,8 @@ COIN_MAP = {
     "LINK": "LINK",
     "ETH": "ETH",
     "XRP": "XRP",
+    "MERL": "MERL",
+    "HEMI": "HEMI",
 }
 
 # Size decimals per coin
@@ -96,6 +98,8 @@ SZ_DECIMALS = {
     "LINK": 1,
     "ETH": 4,
     "XRP": 0,
+    "MERL": 0,
+    "HEMI": 0,
 }
 
 TRADES_CSV = Path("live/stochvol2_trades.csv")
