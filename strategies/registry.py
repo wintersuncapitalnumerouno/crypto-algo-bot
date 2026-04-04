@@ -95,6 +95,16 @@ try:
 except ImportError:
     _stochvol_v3_params = lambda: {}
 
+try:
+    from strategies.stochvol.params_v4 import get_default_params as _stochvol_v4_params
+except ImportError:
+    _stochvol_v4_params = lambda: {}
+
+try:
+    from strategies.stochvol.params_v4 import get_default_params as _stochvol_v4_params
+except ImportError:
+    _stochvol_v4_params = lambda: {}
+
 # ── Momentum frozen params ────────────────────────────────────
 try:
     from strategies.momentum.params_v1 import get_default_params as _momentum_v1_params
@@ -195,6 +205,22 @@ REGISTRY = {
         "params":      _stochvol_v3_params(),
         "params_file": "strategies/stochvol/params_v3.py",
         "description": "StochVol V3 | Stoch(21,5,5) | entry window 3 candles | vol_min 0.5",
+        "enabled":     _has_stochvol_v3,
+    },
+
+    "STOCHVOL_V4": {
+        "fn":          stochvol_v3_signals if _has_stochvol_v3 else None,
+        "params":      _stochvol_v4_params(),
+        "params_file": "strategies/stochvol/params_v4.py",
+        "description": "StochVol V4 | Stoch(14,5,5) | entry window 3 | vol_min 0.3 | optimizer winner",
+        "enabled":     _has_stochvol_v3,
+    },
+
+    "STOCHVOL_V4": {
+        "fn":          stochvol_v3_signals if _has_stochvol_v3 else None,
+        "params":      _stochvol_v4_params(),
+        "params_file": "strategies/stochvol/params_v4.py",
+        "description": "StochVol V4 | Stoch(14,5,5) | entry window 3 candles | vol_min 0.3 | optimizer winner",
         "enabled":     _has_stochvol_v3,
     },
 
