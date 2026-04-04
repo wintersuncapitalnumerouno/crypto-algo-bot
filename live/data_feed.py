@@ -26,6 +26,8 @@ COIN_MAP = {
     "LINK": "LINK",
     "ETH":  "ETH",
     "XRP":  "XRP",
+    "MERL": "MERL",
+    "HEMI": "HEMI",
 }
 
 # How many 5m candles to fetch — enough for 200 4h candles + warmup
