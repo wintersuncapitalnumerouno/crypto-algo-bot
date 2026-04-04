@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from strategies.stochvol.params_v1 import get_default_params
+from strategies.stochvol.params_v4 import get_default_params
 
 
 class StochVolSignalEngine:
@@ -19,6 +19,9 @@ class StochVolSignalEngine:
     def __init__(self):
         self.params = get_default_params()
         self.p      = self.params
+        # V4 param verification
+        import sys
+        print(f'[signal_engine] StochVol V4 | stoch_k={self.p["stoch_k"]} | entry_window={self.p["entry_window"]} | vol_min_ratio={self.p["vol_min_ratio"]}', flush=True)
 
     def get_signal(self, coin: str, df_5m: pd.DataFrame) -> dict:
         """
@@ -58,9 +61,18 @@ class StochVolSignalEngine:
         cross_above = (df["%K"] > df["%D"]) & (prev_k <= prev_d)
         cross_below = (df["%K"] < df["%D"]) & (prev_k >= prev_d)
 
+        # Entry window logic (V3/V4)
+        window = p.get("entry_window", 1)
+        long_signal  = cross_above.copy()
+        short_signal = cross_below.copy()
+        for i in range(1, window):
+            long_signal  = long_signal  | (cross_above.shift(i).fillna(False) & (df["%K"] > df["%D"]))
+            short_signal = short_signal | (cross_below.shift(i).fillna(False) & (df["%K"] < df["%D"]))
         df["signal"] = 0
-        df.loc[cross_above, "signal"] =  1
+        df.loc[long_signal,  "signal"] =  1
+        df.loc[short_signal, "signal"] = -1
         df.loc[cross_below, "signal"] = -1
+        df.loc[cross_above, "signal"] =  1
 
         # ── Volume ────────────────────────────────────────────
         vol_period    = p["vol_period"]
