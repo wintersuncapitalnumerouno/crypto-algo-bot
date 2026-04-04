@@ -62,6 +62,7 @@ LOOP_INTERVAL = 300          # 5 minutes
 RISK_PCT = 0.005             # 0.5% equity per trade
 STOP_PCT = 0.02              # 2% fixed stop
 LEVERAGE = 5
+COIN_LEVERAGE = {"MERL": 3, "HEMI": 3}
 MIN_NOTIONAL = 11.0          # minimum order size USD
 BASKET_SHADOW = True
 SLIPPAGE = 0.01              # 1% slippage buffer for IOC
@@ -347,7 +348,7 @@ class StochVolExecutor:
         for coin in COINS:
             coin_hl = COIN_MAP[coin]
             try:
-                set_leverage(self.exchange, coin_hl, LEVERAGE)
+                set_leverage(self.exchange, coin_hl, COIN_LEVERAGE.get(coin, LEVERAGE))
                 log(f"  ✅ Leverage {LEVERAGE}x set for {coin_hl}")
                 time.sleep(0.3)
             except Exception as e:
