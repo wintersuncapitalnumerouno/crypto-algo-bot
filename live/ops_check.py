@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/root/miniconda3/bin/python
 # =============================================================
 # live/ops_check.py — Lightweight Operator Checklist
 # =============================================================
@@ -26,9 +26,6 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 import requests
-from dotenv import load_dotenv
-
-load_dotenv("/root/crypto-algo-bot/.env")
 
 HL_API = "https://api.hyperliquid.xyz/info"
 
