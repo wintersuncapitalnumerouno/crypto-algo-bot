@@ -14,8 +14,8 @@ STATE_FILE     = "/root/crypto-algo-bot/live/circuit_breaker_state.json"
 MAX_DAILY_LOSS_PCT = 0.03  # 3%
 
 BOTS = [
-    {"name": "StochVol V3 (Wallet 1)", "wallet": "0x9b808Eaa6A795f22C3154c2a8a22C9a1F916BD94", "service": "stochvol-bot-2"},
-    {"name": "StochVol V3 (Wallet 2)", "wallet": "0xb2A1B87B1B91Ad37520594263958cED3948151fF", "service": "stochvol-bot"},
+    {"name": "StochVol V4 (Wallet 1)", "wallet": "0x9b808Eaa6A795f22C3154c2a8a22C9a1F916BD94", "service": "stochvol-bot-2"},
+    {"name": "StochVol V4 (Wallet 2)", "wallet": "0xb2A1B87B1B91Ad37520594263958cED3948151fF", "service": "stochvol-bot"},
 ]
 
 

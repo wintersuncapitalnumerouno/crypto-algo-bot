@@ -10,7 +10,7 @@ HL_API = "https://api.hyperliquid.xyz/info"
 
 BOTS = [
     {
-        "name":       "StochVol V3 (Wallet 1)",
+        "name":       "StochVol V4 (Wallet 1)",
         "wallet":     "0x9b808Eaa6A795f22C3154c2a8a22C9a1F916BD94",
         "service":    "stochvol-bot-2",
         "trades_csv": "/root/crypto-algo-bot/live/stochvol2_trades.csv",
@@ -18,7 +18,7 @@ BOTS = [
         "inception":  71.34,
     },
     {
-        "name":       "StochVol V3 (Wallet 2)",
+        "name":       "StochVol V4 (Wallet 2)",
         "wallet":     "0xb2A1B87B1B91Ad37520594263958cED3948151fF",
         "service":    "stochvol-bot",
         "trades_csv": "/root/crypto-algo-bot/live/stochvol_trades.csv",
