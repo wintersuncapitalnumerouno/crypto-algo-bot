@@ -67,6 +67,7 @@ COIN_LEVERAGE = {"MERL": 3, "HEMI": 3}
 COIN_PRICE_DECIMALS = {"MERL": 6, "HEMI": 6}
 MIN_NOTIONAL = 11.0          # minimum order size USD
 BASKET_SHADOW = True
+MAX_EXIT_RETRIES = 3         # halt trading after this many consecutive exit failures
 SLIPPAGE = 0.01              # 1% slippage buffer for IOC
 
 # Volume sizing (StochVol specific)
@@ -307,6 +308,12 @@ class StochVolExecutor:
         self._load_entry_candle_state()
         self.last_exit_candle = {}
         self.equity = 0.0
+        self.exit_fail_count = {}
+        self.trading_halted = False
+        self.halt_reason = ""
+        self.halted_at = ""
+        self.last_exit_error = {}
+        self.halt_alert_sent = False
 
         log("=" * 60)
         log("  StochVol V4 Executor starting — Wallet 2")
@@ -373,6 +380,11 @@ class StochVolExecutor:
             state = {
                 "positions": {},
                 "last_exit_candle": self.last_exit_candle,
+                "trading_halted": self.trading_halted,
+                "halt_reason": self.halt_reason,
+                "halted_at": self.halted_at,
+                "exit_fail_count": self.exit_fail_count,
+                "last_exit_error": self.last_exit_error,
             }
             for coin, pos in self.positions.items():
                 state["positions"][coin] = {
@@ -452,6 +464,14 @@ class StochVolExecutor:
         saved_positions = saved.get("positions", {})
         saved_exit_candle = saved.get("last_exit_candle", {})
         self.last_exit_candle = saved_exit_candle
+
+        self.trading_halted = saved.get("trading_halted", False)
+        self.halt_reason = saved.get("halt_reason", "")
+        self.halted_at = saved.get("halted_at", "")
+        self.exit_fail_count = saved.get("exit_fail_count", {})
+        self.last_exit_error = saved.get("last_exit_error", {})
+        if self.trading_halted:
+            log(f"  🚨 Halt state restored — reason: {self.halt_reason} (since {self.halted_at})")
 
         # Detect rogue positions not in our coin universe
         known_hl = set(COIN_MAP.values())
@@ -741,6 +761,8 @@ class StochVolExecutor:
                 log(f"  ⚠️  {coin}: no live position on exchange — cleaning up internal state")
                 del self.positions[coin]
                 self.last_exit_candle[coin] = candle_time
+                self.exit_fail_count.pop(coin, None)
+                self.last_exit_error.pop(coin, None)
                 self._save_positions_state()
                 return
         except Exception as e:
@@ -799,17 +821,61 @@ class StochVolExecutor:
 
             del self.positions[coin]
             self.last_exit_candle[coin] = candle_time
+            self.exit_fail_count.pop(coin, None)
+            self.last_exit_error.pop(coin, None)
             self._save_positions_state()
 
         except Exception as e:
             log(f"  ❌ Exit error {coin}: {e}")
             traceback.print_exc()
+            # If position was liquidated or closed on exchange, clean up state
+            try:
+                recheck = get_positions()
+                if coin_hl not in recheck:
+                    log(f"  ⚠️  {coin}: position gone from exchange after failed exit — cleaning up")
+                    del self.positions[coin]
+                    self.last_exit_candle[coin] = candle_time
+                    self.exit_fail_count.pop(coin, None)
+                    self.last_exit_error.pop(coin, None)
+                    self._save_positions_state()
+                    return
+            except Exception:
+                pass
+            # Track consecutive failures and halt if threshold reached
+            self.exit_fail_count[coin] = self.exit_fail_count.get(coin, 0) + 1
+            self.last_exit_error[coin] = str(e)
+            count = self.exit_fail_count[coin]
+            log(f"  ⚠️  {coin}: consecutive exit failure #{count}/{MAX_EXIT_RETRIES}")
+            if count >= MAX_EXIT_RETRIES:
+                self.trading_halted = True
+                self.halt_reason = f"{count} consecutive exit failures on {coin}"
+                self.halted_at = datetime.now(timezone.utc).isoformat()
+                self._save_positions_state()
+                log(f"  🚨 TRADING HALTED — {count} consecutive exit failures on {coin}")
+                send_telegram(
+                    f"🚨 <b>WALLET 2 TRADING HALTED</b>\n"
+                    f"Reason: {self.halt_reason}\n"
+                    f"Last error: {e}\n"
+                    f"Action required: manual intervention"
+                )
+                self.halt_alert_sent = True
 
     def run_once(self):
         equity = self._get_equity()
         log(f"\n{'=' * 55}")
         log(f"  💰 Equity: ${equity:.2f} | Positions: {list(self.positions.keys())}")
         log(f"{'=' * 55}")
+
+        if self.trading_halted:
+            log(f"  🚨 HALTED — entries disabled | {self.halt_reason}")
+            if not self.halt_alert_sent:
+                send_telegram(
+                    f"🚨 <b>WALLET 2 STILL HALTED</b>\n"
+                    f"Reason: {self.halt_reason}\n"
+                    f"Since: {self.halted_at}\n"
+                    f"Manual intervention required"
+                )
+                self.halt_alert_sent = True
 
         shadow_candidates = []
 
@@ -846,12 +912,15 @@ class StochVolExecutor:
 
                     if stop_hit:
                         reason = "trail_stop" if pos.trail_active else "stop_loss"
-                        self._exit_trade(coin, reason, pos.stop_loss, candle_time)
+                        self._exit_trade(coin, reason, current_price, candle_time)
                     elif signal_exit:
                         self._exit_trade(coin, "signal_exit", current_price, candle_time)
 
                 # ── Check for new entry ───────────────────────
                 if coin not in self.positions:
+                    if self.trading_halted:
+                        continue
+
                     action = signal.get("action")
 
                     if action in ("long", "short"):
