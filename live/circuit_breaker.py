@@ -67,43 +67,10 @@ def halt_bots():
 
 
 def main():
-    state  = load_state()
-    now    = datetime.now(timezone.utc)
-    today  = now.strftime("%Y-%m-%d")
-    equity = get_total_equity()
-
-    if equity is None or equity == 0:
-        return
-
-    # Reset baseline at midnight UTC
-    if state.get("date") != today:
-        state = {"date": today, "baseline": equity, "halted": False}
-        save_state(state)
-        return
-
-    # Already halted today — do nothing
-    if state.get("halted"):
-        return
-
-    baseline = state.get("baseline", equity)
-    loss_pct = (baseline - equity) / baseline
-
-    if loss_pct >= MAX_DAILY_LOSS_PCT:
-        halt_bots()
-        state["halted"] = True
-        save_state(state)
-        loss_usd = baseline - equity
-        send_telegram(
-            f"🔴 <b>CIRCUIT BREAKER TRIGGERED</b>\n\n"
-            f"Portfolio dropped <b>{loss_pct*100:.1f}%</b> today\n"
-            f"Baseline: ${baseline:.2f} → Now: ${equity:.2f} (−${loss_usd:.2f})\n\n"
-            f"Both bots have been <b>halted</b>.\n"
-            f"Restart manually when ready:\n"
-            f"<code>systemctl start stochvol-bot stochvol-bot-2</code>"
-        )
-        print(f"CIRCUIT BREAKER: {loss_pct*100:.1f}% loss. Bots halted.")
-    else:
-        print(f"OK: {loss_pct*100:.2f}% loss today (limit: {MAX_DAILY_LOSS_PCT*100}%). Equity: ${equity:.2f}")
+    # 3% daily drawdown circuit breaker DISABLED — 2026-04-09
+    # Reason: false trigger on small portfolio ($120) causing unmanaged positions
+    # Re-enable only after backtested proof of PnL improvement
+    print("Circuit breaker disabled. No action taken.")
 
 
 if __name__ == "__main__":
