@@ -14,6 +14,8 @@ BOTS = [
         "wallet":     "0x9b808Eaa6A795f22C3154c2a8a22C9a1F916BD94",
         "service":    "stochvol-bot-2",
         "trades_csv": "/root/crypto-algo-bot/live/stochvol2_trades.csv",
+        "hl_csv":     "/root/crypto-algo-bot/live/stochvol2_trades_hl.csv",
+        "hl_cutoff":  "2026-04-09 08:02:34",
         "csv_format": "stochvol",
         "inception":  71.34,
     },
@@ -22,6 +24,8 @@ BOTS = [
         "wallet":     "0xb2A1B87B1B91Ad37520594263958cED3948151fF",
         "service":    "stochvol-bot",
         "trades_csv": "/root/crypto-algo-bot/live/stochvol_trades.csv",
+        "hl_csv":     "/root/crypto-algo-bot/live/stochvol_trades_hl.csv",
+        "hl_cutoff":  "2026-04-09 08:02:31",
         "csv_format": "stochvol",
         "inception":  51.34,
     },
@@ -90,64 +94,91 @@ def compute_pnl_ema16(csv_path):
     return p24, p7d, p14d, p30d, ptot, inc_eq, trades
 
 
-def compute_pnl_stochvol(csv_path):
+def compute_pnl_stochvol(trades_csv, hl_csv=None, hl_cutoff=None):
     now  = datetime.now(timezone.utc)
     c24  = now - timedelta(hours=24)
     c7d  = now - timedelta(days=7)
     c14d = now - timedelta(days=14)
     c30d = now - timedelta(days=30)
-    if not os.path.exists(csv_path):
-        return None, None, None, None, None, None, None
-    rows = []
-    with open(csv_path) as f:
-        for row in csv.DictReader(f):
-            rows.append(row)
-    if not rows:
-        return None, None, None, None, None, None, None
-    try:
-        inc_eq = float(rows[0]["equity"])
-    except:
-        inc_eq = None
-    entries = {}
     p24 = p7d = p14d = p30d = ptot = 0.0
     trades = 0
-    for row in rows:
-        coin = row["coin"]
-        if row.get("type") == "entry":
-            try:
-                entries[coin] = {
-                    "price":     float(row["price"]),
-                    "size_usd":  float(row["size_usd"]),
-                    "direction": row["direction"],
-                }
-            except:
-                pass
-        elif row.get("type") == "exit":
-            entry = entries.get(coin)
-            if not entry:
-                continue
-            try:
-                ep  = float(row["price"])
-                xp  = entry["price"]
-                sz  = entry["size_usd"]
-                pnl = (ep - xp) / xp * sz if entry["direction"] == "long" else (xp - ep) / xp * sz
-                ts_str = row["timestamp"].strip()
-                try:
-                    ts = datetime.fromisoformat(ts_str)
-                    if ts.tzinfo is None:
-                        ts = ts.replace(tzinfo=timezone.utc)
-                except:
-                    ts = datetime.strptime(ts_str[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
-                ptot   += pnl
-                trades += 1
+
+    # Phase 1: Hyperliquid seed CSV (ground truth up to cutoff)
+    if hl_csv and os.path.exists(hl_csv):
+        with open(hl_csv) as f:
+            for row in csv.DictReader(f):
+                pnl = float(row["closedPnl"])
+                ts = datetime.strptime(row["time"].strip(), "%m/%d/%Y - %H:%M:%S").replace(tzinfo=timezone.utc)
+                ptot += pnl
+                if "Close" in row.get("dir", ""):
+                    trades += 1
                 if ts >= c24:  p24  += pnl
                 if ts >= c7d:  p7d  += pnl
                 if ts >= c14d: p14d += pnl
                 if ts >= c30d: p30d += pnl
-                entries.pop(coin, None)
-            except:
-                pass
-    return p24, p7d, p14d, p30d, ptot, inc_eq, trades
+
+    # Phase 2: Bot CSV for trades AFTER cutoff (entry/exit matching)
+    cutoff_ts = None
+    if hl_cutoff:
+        cutoff_ts = datetime.strptime(hl_cutoff, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+
+    if os.path.exists(trades_csv):
+        entries = {}
+        with open(trades_csv) as f:
+            for row in csv.DictReader(f):
+                if cutoff_ts:
+                    try:
+                        ts_str = row["timestamp"].strip()
+                        try:
+                            ts = datetime.fromisoformat(ts_str)
+                            if ts.tzinfo is None:
+                                ts = ts.replace(tzinfo=timezone.utc)
+                        except:
+                            ts = datetime.strptime(ts_str[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                        if ts <= cutoff_ts:
+                            continue
+                    except:
+                        continue
+
+                coin = row["coin"]
+                if row.get("type") == "entry":
+                    try:
+                        entries[coin] = {
+                            "price":     float(row["price"]),
+                            "size_usd":  float(row["size_usd"]),
+                            "direction": row["direction"],
+                        }
+                    except:
+                        pass
+                elif row.get("type") == "exit":
+                    entry = entries.get(coin)
+                    if not entry:
+                        continue
+                    try:
+                        ep  = float(row["price"])
+                        xp  = entry["price"]
+                        sz  = entry["size_usd"]
+                        pnl = (ep - xp) / xp * sz if entry["direction"] == "long" else (xp - ep) / xp * sz
+                        ts_str = row["timestamp"].strip()
+                        try:
+                            ts = datetime.fromisoformat(ts_str)
+                            if ts.tzinfo is None:
+                                ts = ts.replace(tzinfo=timezone.utc)
+                        except:
+                            ts = datetime.strptime(ts_str[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                        ptot   += pnl
+                        trades += 1
+                        if ts >= c24:  p24  += pnl
+                        if ts >= c7d:  p7d  += pnl
+                        if ts >= c14d: p14d += pnl
+                        if ts >= c30d: p30d += pnl
+                        entries.pop(coin, None)
+                    except:
+                        pass
+
+    if trades == 0 and ptot == 0:
+        return None, None, None, None, None, None, None
+    return p24, p7d, p14d, p30d, ptot, None, trades
 
 
 def fmt_pnl(val, inc=None):
@@ -170,7 +201,7 @@ def send_telegram(msg):
 
 def main():
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    lines = [f"🤖 <b>Heartbeat</b> — {now}", ""]
+    lines = [f"\U0001f916 <b>Heartbeat</b> \u2014 {now}", ""]
 
     total_eq   = 0.0
     total_inc  = 0.0
@@ -195,7 +226,8 @@ def main():
         if fmt == "ema16":
             p24, p7d, p14d, p30d, ptot, inc_eq, n = compute_pnl_ema16(bot["trades_csv"])
         else:
-            p24, p7d, p14d, p30d, ptot, inc_eq, n = compute_pnl_stochvol(bot["trades_csv"])
+            p24, p7d, p14d, p30d, ptot, inc_eq, n = compute_pnl_stochvol(
+                bot["trades_csv"], bot.get("hl_csv"), bot.get("hl_cutoff"))
 
         # use hardcoded inception if CSV didn't yield one
         if inc_eq is None:
@@ -208,7 +240,7 @@ def main():
         if ptot is not None: total_ptot += ptot
         if inc_eq:           total_inc  += inc_eq
 
-        icon    = "✅" if ok else "❌"
+        icon    = "\u2705" if ok else "\u274c"
         eq_str  = f"${equity:.2f}" if equity else "N/A"
         pos_str = ", ".join(positions) if positions else "none"
 
@@ -227,14 +259,14 @@ def main():
 
     # Portfolio summary
     pct_str = f" ({total_ptot / total_inc * 100:+.1f}%)" if total_inc > 0 else ""
-    lines.append(f"💰 <b>Total equity : ${total_eq:.2f}</b>")
-    lines.append(f"📈 PnL 24h    : {fmt_pnl(total_p24)}")
-    lines.append(f"📈 PnL 7d     : {fmt_pnl(total_p7d)}")
-    lines.append(f"📈 PnL 14d    : {fmt_pnl(total_p14d)}")
-    lines.append(f"📈 PnL 30d    : {fmt_pnl(total_p30d)}")
-    lines.append(f"📈 PnL total  : {fmt_pnl(total_ptot)}{pct_str}")
+    lines.append(f"\U0001f4b0 <b>Total equity : ${total_eq:.2f}</b>")
+    lines.append(f"\U0001f4c8 PnL 24h    : {fmt_pnl(total_p24)}")
+    lines.append(f"\U0001f4c8 PnL 7d     : {fmt_pnl(total_p7d)}")
+    lines.append(f"\U0001f4c8 PnL 14d    : {fmt_pnl(total_p14d)}")
+    lines.append(f"\U0001f4c8 PnL 30d    : {fmt_pnl(total_p30d)}")
+    lines.append(f"\U0001f4c8 PnL total  : {fmt_pnl(total_ptot)}{pct_str}")
     lines.append("")
-    lines.append("🟢 All systems OK" if all_ok else "🔴 CHECK REQUIRED")
+    lines.append("\U0001f7e2 All systems OK" if all_ok else "\U0001f534 CHECK REQUIRED")
 
     msg = "\n".join(lines)
     send_telegram(msg)
