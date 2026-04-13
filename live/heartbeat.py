@@ -9,13 +9,6 @@ import os as _os; from dotenv import load_dotenv as _ld; _ld("/root/crypto-algo-
 CHAT_ID = "1855483522"
 HL_API = "https://api.hyperliquid.xyz/info"
 
-# ── Fee constant (matches trade_logger.py / config.py) ───────
-# Live fills already include slippage; only taker fee applies.
-LIVE_FEE = 0.00035   # 0.035% per side
-
-# ── Canonical trade registry ─────────────────────────────────
-MASTER_CSV = Path("/root/crypto-algo-bot/live/trades_master.csv")
-
 BOTS = [
     {
         "name":       "StochVol V4 (Wallet 1)",
@@ -104,135 +97,47 @@ def compute_pnl_ema16(csv_path):
     return p24, p7d, p14d, p30d, ptot, inc_eq, trades
 
 
-def compute_pnl_stochvol(trades_csv, hl_csv=None, hl_cutoff=None, bot_id=None):
-    now  = datetime.now(timezone.utc)
-    c24  = now - timedelta(hours=24)
-    c7d  = now - timedelta(days=7)
-    c14d = now - timedelta(days=14)
-    c30d = now - timedelta(days=30)
+def compute_pnl_from_fills(wallet):
+    """Fetch fills from Hyperliquid API and sum closedPnl by time window."""
+    now    = datetime.now(timezone.utc)
+    c24    = now - timedelta(hours=24)
+    c7d    = now - timedelta(days=7)
+    c14d   = now - timedelta(days=14)
+    c30d   = now - timedelta(days=30)
     p24 = p7d = p14d = p30d = ptot = 0.0
     trades = 0
 
-    # Phase 1: Hyperliquid seed CSV (ground truth up to cutoff)
-    if hl_csv and os.path.exists(hl_csv):
-        with open(hl_csv) as f:
-            for row in csv.DictReader(f):
-                pnl = float(row["closedPnl"])
-                ts = datetime.strptime(row["time"].strip(), "%m/%d/%Y - %H:%M:%S").replace(tzinfo=timezone.utc)
-                ptot += pnl
-                if "Close" in row.get("dir", ""):
-                    trades += 1
+    # Paginate through all available fills (up to 10k via HL API)
+    max_pages = 20
+    start_ms = 0  # from the beginning
+    try:
+        for _ in range(max_pages):
+            payload = {"type": "userFillsByTime", "user": wallet,
+                       "startTime": start_ms, "aggregateByTime": True}
+            r = requests.post(HL_API, json=payload, timeout=10)
+            r.raise_for_status()
+            fills = r.json()
+            if not fills:
+                break
+            for fill in fills:
+                pnl = float(fill["closedPnl"])
+                if pnl == 0:
+                    continue
+                ts = datetime.fromtimestamp(fill["time"] / 1000, tz=timezone.utc)
+                ptot   += pnl
+                trades += 1
                 if ts >= c24:  p24  += pnl
                 if ts >= c7d:  p7d  += pnl
                 if ts >= c14d: p14d += pnl
                 if ts >= c30d: p30d += pnl
+            if len(fills) < 2000:
+                break
+            # Next page: start after last fill's timestamp
+            start_ms = fills[-1]["time"] + 1
+    except Exception:
+        return None, None, None, None, None, None, None
 
-    # Phase 2: Bot CSV for gap trades (hl_cutoff → master_csv start)
-    # Fee-adjusted to match backtest methodology.
-    cutoff_ts = None
-    if hl_cutoff:
-        cutoff_ts = datetime.strptime(hl_cutoff, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
-
-    # Find earliest trade in master CSV to know where Phase 2 ends
-    master_start_ts = None
-    if MASTER_CSV.exists() and bot_id:
-        with open(MASTER_CSV) as f:
-            for row in csv.DictReader(f):
-                if row.get("bot_id") != bot_id:
-                    continue
-                try:
-                    ts = datetime.fromisoformat(row["exit_time"])
-                    if ts.tzinfo is None:
-                        ts = ts.replace(tzinfo=timezone.utc)
-                    if master_start_ts is None or ts < master_start_ts:
-                        master_start_ts = ts
-                except:
-                    pass
-
-    if os.path.exists(trades_csv):
-        entries = {}
-        with open(trades_csv) as f:
-            for row in csv.DictReader(f):
-                if cutoff_ts:
-                    try:
-                        ts_str = row["timestamp"].strip()
-                        try:
-                            ts = datetime.fromisoformat(ts_str)
-                            if ts.tzinfo is None:
-                                ts = ts.replace(tzinfo=timezone.utc)
-                        except:
-                            ts = datetime.strptime(ts_str[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
-                        if ts <= cutoff_ts:
-                            continue
-                        # Stop Phase 2 where master CSV takes over
-                        if master_start_ts and ts >= master_start_ts:
-                            continue
-                    except:
-                        continue
-
-                coin = row["coin"]
-                if row.get("type") == "entry":
-                    try:
-                        entries[coin] = {
-                            "price":     float(row["price"]),
-                            "size_usd":  float(row["size_usd"]),
-                            "direction": row["direction"],
-                        }
-                    except:
-                        pass
-                elif row.get("type") == "exit":
-                    entry = entries.get(coin)
-                    if not entry:
-                        continue
-                    try:
-                        ep  = float(row["price"])
-                        xp  = entry["price"]
-                        sz  = entry["size_usd"]
-                        # Fee-adjusted PnL (LIVE_FEE on both legs)
-                        if entry["direction"] == "long":
-                            adj_entry = xp * (1 + LIVE_FEE)
-                            pnl = (ep * (1 - LIVE_FEE) - adj_entry) / adj_entry * sz
-                        else:
-                            adj_entry = xp * (1 - LIVE_FEE)
-                            pnl = (adj_entry - ep * (1 + LIVE_FEE)) / adj_entry * sz
-                        ts_str = row["timestamp"].strip()
-                        try:
-                            ts = datetime.fromisoformat(ts_str)
-                            if ts.tzinfo is None:
-                                ts = ts.replace(tzinfo=timezone.utc)
-                        except:
-                            ts = datetime.strptime(ts_str[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
-                        ptot   += pnl
-                        trades += 1
-                        if ts >= c24:  p24  += pnl
-                        if ts >= c7d:  p7d  += pnl
-                        if ts >= c14d: p14d += pnl
-                        if ts >= c30d: p30d += pnl
-                        entries.pop(coin, None)
-                    except:
-                        pass
-
-    # Phase 3: Master CSV (canonical, fee-adjusted PnL from trade_logger)
-    if MASTER_CSV.exists() and bot_id:
-        with open(MASTER_CSV) as f:
-            for row in csv.DictReader(f):
-                if row.get("bot_id") != bot_id:
-                    continue
-                try:
-                    pnl = float(row["pnl_usd"])
-                    ts = datetime.fromisoformat(row["exit_time"])
-                    if ts.tzinfo is None:
-                        ts = ts.replace(tzinfo=timezone.utc)
-                    ptot   += pnl
-                    trades += 1
-                    if ts >= c24:  p24  += pnl
-                    if ts >= c7d:  p7d  += pnl
-                    if ts >= c14d: p14d += pnl
-                    if ts >= c30d: p30d += pnl
-                except:
-                    pass
-
-    if trades == 0 and ptot == 0:
+    if trades == 0:
         return None, None, None, None, None, None, None
     return p24, p7d, p14d, p30d, ptot, None, trades
 
@@ -282,9 +187,7 @@ def main():
         if fmt == "ema16":
             p24, p7d, p14d, p30d, ptot, inc_eq, n = compute_pnl_ema16(bot["trades_csv"])
         else:
-            p24, p7d, p14d, p30d, ptot, inc_eq, n = compute_pnl_stochvol(
-                bot["trades_csv"], bot.get("hl_csv"), bot.get("hl_cutoff"),
-                bot_id=bot.get("bot_id"))
+            p24, p7d, p14d, p30d, ptot, inc_eq, n = compute_pnl_from_fills(bot["wallet"])
 
         # use hardcoded inception if CSV didn't yield one
         if inc_eq is None:
