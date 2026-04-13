@@ -1,6 +1,7 @@
 import requests
 import subprocess
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 import csv
 import os
 
@@ -8,11 +9,19 @@ import os as _os; from dotenv import load_dotenv as _ld; _ld("/root/crypto-algo-
 CHAT_ID = "1855483522"
 HL_API = "https://api.hyperliquid.xyz/info"
 
+# ── Fee constant (matches trade_logger.py / config.py) ───────
+# Live fills already include slippage; only taker fee applies.
+LIVE_FEE = 0.00035   # 0.035% per side
+
+# ── Canonical trade registry ─────────────────────────────────
+MASTER_CSV = Path("/root/crypto-algo-bot/live/trades_master.csv")
+
 BOTS = [
     {
         "name":       "StochVol V4 (Wallet 1)",
         "wallet":     "0x9b808Eaa6A795f22C3154c2a8a22C9a1F916BD94",
         "service":    "stochvol-bot-2",
+        "bot_id":     "wallet1",
         "trades_csv": "/root/crypto-algo-bot/live/stochvol2_trades.csv",
         "hl_csv":     "/root/crypto-algo-bot/live/stochvol2_trades_hl.csv",
         "hl_cutoff":  "2026-04-09 08:02:34",
@@ -23,6 +32,7 @@ BOTS = [
         "name":       "StochVol V4 (Wallet 2)",
         "wallet":     "0xb2A1B87B1B91Ad37520594263958cED3948151fF",
         "service":    "stochvol-bot",
+        "bot_id":     "wallet2",
         "trades_csv": "/root/crypto-algo-bot/live/stochvol_trades.csv",
         "hl_csv":     "/root/crypto-algo-bot/live/stochvol_trades_hl.csv",
         "hl_cutoff":  "2026-04-09 08:02:31",
@@ -94,7 +104,7 @@ def compute_pnl_ema16(csv_path):
     return p24, p7d, p14d, p30d, ptot, inc_eq, trades
 
 
-def compute_pnl_stochvol(trades_csv, hl_csv=None, hl_cutoff=None):
+def compute_pnl_stochvol(trades_csv, hl_csv=None, hl_cutoff=None, bot_id=None):
     now  = datetime.now(timezone.utc)
     c24  = now - timedelta(hours=24)
     c7d  = now - timedelta(days=7)
@@ -117,10 +127,27 @@ def compute_pnl_stochvol(trades_csv, hl_csv=None, hl_cutoff=None):
                 if ts >= c14d: p14d += pnl
                 if ts >= c30d: p30d += pnl
 
-    # Phase 2: Bot CSV for trades AFTER cutoff (entry/exit matching)
+    # Phase 2: Bot CSV for gap trades (hl_cutoff → master_csv start)
+    # Fee-adjusted to match backtest methodology.
     cutoff_ts = None
     if hl_cutoff:
         cutoff_ts = datetime.strptime(hl_cutoff, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+
+    # Find earliest trade in master CSV to know where Phase 2 ends
+    master_start_ts = None
+    if MASTER_CSV.exists() and bot_id:
+        with open(MASTER_CSV) as f:
+            for row in csv.DictReader(f):
+                if row.get("bot_id") != bot_id:
+                    continue
+                try:
+                    ts = datetime.fromisoformat(row["exit_time"])
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=timezone.utc)
+                    if master_start_ts is None or ts < master_start_ts:
+                        master_start_ts = ts
+                except:
+                    pass
 
     if os.path.exists(trades_csv):
         entries = {}
@@ -136,6 +163,9 @@ def compute_pnl_stochvol(trades_csv, hl_csv=None, hl_cutoff=None):
                         except:
                             ts = datetime.strptime(ts_str[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
                         if ts <= cutoff_ts:
+                            continue
+                        # Stop Phase 2 where master CSV takes over
+                        if master_start_ts and ts >= master_start_ts:
                             continue
                     except:
                         continue
@@ -158,7 +188,13 @@ def compute_pnl_stochvol(trades_csv, hl_csv=None, hl_cutoff=None):
                         ep  = float(row["price"])
                         xp  = entry["price"]
                         sz  = entry["size_usd"]
-                        pnl = (ep - xp) / xp * sz if entry["direction"] == "long" else (xp - ep) / xp * sz
+                        # Fee-adjusted PnL (LIVE_FEE on both legs)
+                        if entry["direction"] == "long":
+                            adj_entry = xp * (1 + LIVE_FEE)
+                            pnl = (ep * (1 - LIVE_FEE) - adj_entry) / adj_entry * sz
+                        else:
+                            adj_entry = xp * (1 - LIVE_FEE)
+                            pnl = (adj_entry - ep * (1 + LIVE_FEE)) / adj_entry * sz
                         ts_str = row["timestamp"].strip()
                         try:
                             ts = datetime.fromisoformat(ts_str)
@@ -175,6 +211,26 @@ def compute_pnl_stochvol(trades_csv, hl_csv=None, hl_cutoff=None):
                         entries.pop(coin, None)
                     except:
                         pass
+
+    # Phase 3: Master CSV (canonical, fee-adjusted PnL from trade_logger)
+    if MASTER_CSV.exists() and bot_id:
+        with open(MASTER_CSV) as f:
+            for row in csv.DictReader(f):
+                if row.get("bot_id") != bot_id:
+                    continue
+                try:
+                    pnl = float(row["pnl_usd"])
+                    ts = datetime.fromisoformat(row["exit_time"])
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=timezone.utc)
+                    ptot   += pnl
+                    trades += 1
+                    if ts >= c24:  p24  += pnl
+                    if ts >= c7d:  p7d  += pnl
+                    if ts >= c14d: p14d += pnl
+                    if ts >= c30d: p30d += pnl
+                except:
+                    pass
 
     if trades == 0 and ptot == 0:
         return None, None, None, None, None, None, None
@@ -227,7 +283,8 @@ def main():
             p24, p7d, p14d, p30d, ptot, inc_eq, n = compute_pnl_ema16(bot["trades_csv"])
         else:
             p24, p7d, p14d, p30d, ptot, inc_eq, n = compute_pnl_stochvol(
-                bot["trades_csv"], bot.get("hl_csv"), bot.get("hl_cutoff"))
+                bot["trades_csv"], bot.get("hl_csv"), bot.get("hl_cutoff"),
+                bot_id=bot.get("bot_id"))
 
         # use hardcoded inception if CSV didn't yield one
         if inc_eq is None:

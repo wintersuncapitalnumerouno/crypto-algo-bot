@@ -28,6 +28,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+from live.trade_logger import record_trade
 load_dotenv()
 
 # ── Telegram notifications ────────────────────────────────────
@@ -818,6 +819,27 @@ class StochVolExecutor:
                 "equity": round(self.equity, 2),
                 "candle_time": candle_time,
             })
+
+            # ── Canonical trade registry (fee-adjusted PnL) ──
+            try:
+                record_trade(
+                    strategy="STOCHVOL_V4",
+                    bot_id="wallet2",
+                    coin=coin,
+                    direction=pos.direction,
+                    entry_time=pos.entry_time,
+                    exit_time=datetime.now(timezone.utc),
+                    entry_price=pos.entry_price,
+                    exit_price=exit_price_for_log,
+                    size_usd=pos.size_usd,
+                    stop_loss=pos.stop_loss,
+                    take_profit=0.0,
+                    exit_reason=reason,
+                    equity_after=self.equity,
+                    vol_ratio=pos.vol_ratio,
+                )
+            except Exception as e:
+                log(f"  ⚠️  trade_logger error: {e}")
 
             del self.positions[coin]
             self.last_exit_candle[coin] = candle_time
