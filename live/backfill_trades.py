@@ -36,14 +36,17 @@ FIELDS = [
 def fetch_all_fills(wallet):
     """Paginate through all fills for a wallet."""
     all_fills = []
-    start_ms = 0
-    for _ in range(MAX_PAGES):
+    # March 1, 2026 00:00 UTC — wallets didn't exist before this
+    start_ms = int(datetime(2026, 3, 1, tzinfo=timezone.utc).timestamp() * 1000)
+    for page in range(MAX_PAGES):
+        print(f"    Page {page + 1}: startTime={start_ms} ...", flush=True)
         r = requests.post(HL_API, json={
             "type": "userFillsByTime", "user": wallet,
             "startTime": start_ms, "aggregateByTime": True,
-        }, timeout=15)
+        }, timeout=30)
         r.raise_for_status()
         fills = r.json()
+        print(f"    -> got {len(fills)} fills", flush=True)
         if not fills:
             break
         all_fills.extend(fills)
