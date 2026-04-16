@@ -19,7 +19,6 @@ BOTS = [
         "hl_csv":     "/root/crypto-algo-bot/live/stochvol2_trades_hl.csv",
         "hl_cutoff":  "2026-04-09 08:02:34",
         "csv_format": "stochvol",
-        "inception":  71.34,
     },
     {
         "name":       "StochVol V4 (Wallet 2)",
@@ -30,7 +29,6 @@ BOTS = [
         "hl_csv":     "/root/crypto-algo-bot/live/stochvol_trades_hl.csv",
         "hl_cutoff":  "2026-04-09 08:02:31",
         "csv_format": "stochvol",
-        "inception":  51.34,
     },
 ]
 
@@ -165,7 +163,6 @@ def main():
     lines = [f"\U0001f916 <b>Heartbeat</b> \u2014 {now}", ""]
 
     total_eq   = 0.0
-    total_inc  = 0.0
     total_p24  = 0.0
     total_p7d  = 0.0
     total_p14d = 0.0
@@ -189,16 +186,11 @@ def main():
         else:
             p24, p7d, p14d, p30d, ptot, inc_eq, n = compute_pnl_from_fills(bot["wallet"])
 
-        # use hardcoded inception if CSV didn't yield one
-        if inc_eq is None:
-            inc_eq = bot.get("inception")
-
         if p24  is not None: total_p24  += p24
         if p7d  is not None: total_p7d  += p7d
         if p14d is not None: total_p14d += p14d
         if p30d is not None: total_p30d += p30d
         if ptot is not None: total_ptot += ptot
-        if inc_eq:           total_inc  += inc_eq
 
         icon    = "\u2705" if ok else "\u274c"
         eq_str  = f"${equity:.2f}" if equity else "N/A"
@@ -208,17 +200,17 @@ def main():
         lines.append(f"   Service  : {status}")
         lines.append(f"   Equity   : {eq_str}")
         lines.append("   Positions: " + pos_str)
-        lines.append(f"   PnL 24h  : {fmt_pnl(p24,  inc_eq)}")
-        lines.append(f"   PnL 7d   : {fmt_pnl(p7d,  inc_eq)}")
-        lines.append(f"   PnL 14d  : {fmt_pnl(p14d, inc_eq)}")
-        lines.append(f"   PnL 30d  : {fmt_pnl(p30d, inc_eq)}")
-        lines.append(f"   PnL total: {fmt_pnl(ptot, inc_eq)}")
+        lines.append(f"   PnL 24h  : {fmt_pnl(p24,  equity)}")
+        lines.append(f"   PnL 7d   : {fmt_pnl(p7d,  equity)}")
+        lines.append(f"   PnL 14d  : {fmt_pnl(p14d, equity)}")
+        lines.append(f"   PnL 30d  : {fmt_pnl(p30d, equity)}")
+        lines.append(f"   PnL total: {fmt_pnl(ptot, equity)}")
         if n:
             lines.append(f"   Trades   : {n} closed")
         lines.append("")
 
     # Portfolio summary
-    pct_str = f" ({total_ptot / total_inc * 100:+.1f}%)" if total_inc > 0 else ""
+    pct_str = f" ({total_ptot / total_eq * 100:+.1f}%)" if total_eq > 0 else ""
     lines.append(f"\U0001f4b0 <b>Total equity : ${total_eq:.2f}</b>")
     lines.append(f"\U0001f4c8 PnL 24h    : {fmt_pnl(total_p24)}")
     lines.append(f"\U0001f4c8 PnL 7d     : {fmt_pnl(total_p7d)}")
