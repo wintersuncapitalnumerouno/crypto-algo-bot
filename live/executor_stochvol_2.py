@@ -58,14 +58,14 @@ DEDUP_FILE = "last_entry_candle_2.json"
 POSITIONS_STATE_FILE = "positions_state_2.json"
 HL_API = "https://api.hyperliquid.xyz"
 
-COINS = ["PEPE", "SOL", "AAVE", "DOGE", "LINK", "ETH", "XRP", "MERL", "HEMI"]
+COINS = ["PEPE", "SOL", "AAVE", "DOGE", "LINK", "ETH", "XRP"]
 
 LOOP_INTERVAL = 300          # 5 minutes
 RISK_PCT = 0.005             # 0.5% equity per trade
 STOP_PCT = 0.02              # 2% fixed stop
 LEVERAGE = 5
-COIN_LEVERAGE = {"MERL": 3, "HEMI": 3}
-COIN_PRICE_DECIMALS = {"kPEPE": 6, "MERL": 6, "HEMI": 6}
+COIN_LEVERAGE = {}
+COIN_PRICE_DECIMALS = {"kPEPE": 6}
 MIN_NOTIONAL = 11.0          # minimum order size USD
 BASKET_SHADOW = True
 MAX_EXIT_RETRIES = 3         # halt trading after this many consecutive exit failures
@@ -94,8 +94,6 @@ COIN_MAP = {
     "LINK": "LINK",
     "ETH": "ETH",
     "XRP": "XRP",
-    "MERL": "MERL",
-    "HEMI": "HEMI",
 }
 
 # Size decimals per coin
@@ -107,8 +105,6 @@ SZ_DECIMALS = {
     "LINK": 1,
     "ETH": 4,
     "XRP": 0,
-    "MERL": 0,
-    "HEMI": 0,
 }
 
 TRADES_CSV = Path("live/stochvol2_trades.csv")
